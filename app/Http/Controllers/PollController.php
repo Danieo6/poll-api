@@ -7,6 +7,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 
 use App\Poll;
 use App\PollAnswer;
@@ -26,14 +27,18 @@ class PollController extends Controller
      */
     public function get(Request $req, $id)
     {
-        if (!is_numeric($id))
+        if (!$this->is_uint($id))
             return response()->json(['error' => 'id_nan'], 400);
 
-        $poll = Poll::with(['answers' => function($query){
-            $query->withcount('votes');
-        }])->find($id);
+        $result = Cache::remember("poll_results_{$id}", 3600, function () use ($id) {
 
-        return response()->json(['poll' => $poll], 200);
+            return Poll::with(['answers' => function ($query) {
+                $query->withcount('votes');
+            }])->find($id);
+
+        });
+
+        return response()->json(['poll' => $result], 200);
     }
 
     //* Create a new poll
@@ -90,7 +95,10 @@ class PollController extends Controller
         PollAnswer::insert($answers);
 
         // Everything seems okey!
-        return response()->json(['status' => 'ok', 'pollId' => $poll->id], 200);
+        return response()->json([
+            'status' => 'ok',
+            'pollId' => $poll->id]
+        , 200);
     }
 
     //* Vote to an poll
@@ -98,9 +106,9 @@ class PollController extends Controller
     {
         // Basic validation
         $validator = Validator::make($req->all(), [
-        'poll' => 'required|integer|exists:polls,id',
-        'answers' => 'required|array',
-        'fingerprint' => 'required|alpha_num'
+            'poll' => 'required|integer|exists:polls,id',
+            'answers' => 'required|array',
+            'fingerprint' => 'required|alpha_num'
         ]);
         
         if ($validator->fails())
@@ -140,7 +148,7 @@ class PollController extends Controller
         $votes = [];
         foreach ($req->answers as $answer)
         {
-            if (!is_numeric($answer))
+            if (!$this->is_uint($answer))
             {
                 return response()->json(['errors' => ['Invalid answer ID']], 400);
             }
